@@ -2,12 +2,11 @@ const low = require('lowdb')
 const FileAsync = require('lowdb/adapters/FileAsync')
 
 const adapter = new FileAsync('./db.json')
-const lowdb = low(adapter)
 
-const getDb = () => lowdb.then((db) => db.defaults({ followed: [] }))
+const getDb = () => low(adapter).then((db) => db.defaults({ followed: [] }))
 
 const get = (key) =>
-  lowdb.then((db) => db.get(key).value())
+  getDb().then((db) => db.get(key).value())
 
 const set = (key, value) =>
   getDb().then((db) => db
