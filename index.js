@@ -1,10 +1,9 @@
 const ispi = require('@rodrigogs/ispi')
 const puppeteer = require('puppeteer')
 const yargs = require('yargs/yargs')
-const { hideBin } = require('yargs/helpers')
 const cache = require('./cache')
 
-const { username, password } = yargs(hideBin(process.argv)).argv
+const { username, password } = yargs(process.argv).argv
 
 const TIMELINE_POSTS_SELECTOR = '#react-root > div > div > div > main > div > div > div > div > div > div > div > div > section > div > div > div > div > div > article > div > div > div'
 const TIMELINE_POST_LINK_SELECTOR = 'a > time'
@@ -97,6 +96,7 @@ const getPostFollowers = async (page) => {
       const followBtnText = await followBtn.evaluate((el) => el.innerText)
       if (followBtnText.search(/following/gi) !== -1) return console.log('Already following')
       await container.$(POST_LIKER_FOLLOW_BTN_SELECTOR).then(el => el.click())
+
       return page.waitForTimeout(3000)
     }
   })))
@@ -123,6 +123,19 @@ const pickRandomFollowed = (from, to, followers) => {
   return results
 }
 
+const isToday = (someDate) => {
+  const today = new Date()
+  return someDate.getDate() === today.getDate() &&
+    someDate.getMonth() === today.getMonth() &&
+    someDate.getFullYear() === today.getFullYear()
+}
+
+const checkTwitterLimits = async () => {
+  const followed = await cache.getFollowed()
+  const followedToday = followed.filter((f) => isToday(new Date(f.followedAt))).length
+  if (followedToday > 390) throw new Error('Stopping auto follower to prevent reaching Twitter limits')
+}
+
 const getBrowserConfig = () => ispi()
   .then(isIt => isIt
     ? {
@@ -134,10 +147,10 @@ const getBrowserConfig = () => ispi()
       headless: false
     })
 
-
 const followSome = async (from = 2, to = 5) => {
   let browser
   try {
+    await checkTwitterLimits()
     browser = await puppeteer.launch(await getBrowserConfig())
     const page = await browser.newPage()
     await login(page)
