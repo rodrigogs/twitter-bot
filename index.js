@@ -187,7 +187,7 @@ const unfollowSome = async (from, to) => {
     const page = await browser.newPage()
     await login(page)
     await wait(3000)
-    const ONE_WEEK_MILLIS = 60 * 1000 * 60 * 24 * 7
+    const ONE_DAY = 60 * 1000 * 60 * 24
     const followed = (await cache.getFollowed()).filter(follower => !follower.unfollowedAt)
     const randomFollowed = pickRandomFollowed(from, to, followed)
     console.log(`Unfollowing ${randomFollowed.length} accounts this time`)
@@ -206,8 +206,8 @@ const unfollowSome = async (from, to) => {
       const hasFollowingYouBadge = await page.$(ACCOUNT_FOLLOWING_YOU_BADGE_SELECTOR)
       if (!hasFollowingYouBadge)  {
         console.log(`${account.handle} is not following you back`)
-        if ((Date.now() - account.followedAt) < ONE_WEEK_MILLIS) {
-          console.log(`${account.handle} was not followed more than one week ago, so lets wait`)
+        if ((Date.now() - account.followedAt) < ONE_DAY) {
+          console.log(`${account.handle} was not followed more than one day ago, so lets wait`)
           continue
         }
       }
