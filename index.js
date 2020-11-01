@@ -7,10 +7,12 @@ const cache = require('./cache')
 const { username, password, unfollowEveryone } = yargs(process.argv).argv
 
 const ONE_DAY_MILLIS = 60 * 1000 * 60 * 24
+const ACCOUNT_ACCESS_TITLE_SELECTOR = 'body > div.PageContainer > div > div.PageHeader.Edge'
 const TIMELINE_POSTS_SELECTOR = '#react-root > div > div > div > main > div > div > div > div > div > div > div > div > section > div > div > div > div > div > article > div > div > div'
 const TIMELINE_POST_LINK_SELECTOR = 'a > time'
 const TIMELINE_POST_LIKES_SELECTOR = 'div > div:nth-child(3) > div > div > div > span > span'
 const POST_ATTRIBUTES_SELECTOR = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > section > div > div > div:nth-child(1) > div > div > article > div > div > div > div:nth-child(3) > div:nth-child(4) > div > div > div > a';
+const POST_LIKERS_CONTAINER_SELECTOR = '#layers > div:nth-child(2) > div > div > div > div > div > div > div > div > div:nth-child(2) > div'
 const POST_LIKERS_SELECTOR = '#layers > div:nth-child(2) > div > div > div > div > div > div > div > div > div > div > div > section > div > div > div > div > div > div'
 const POST_LIKER_NAME_SELECTOR = 'a > div > div:nth-child(1) > div > span'
 const POST_LIKER_HANDLE_SELECTOR = 'a > div > div:nth-child(2) > div > span'
@@ -26,9 +28,38 @@ const ACCOUNT_FOLLOWING_YOU_BADGE_SELECTOR = '#react-root > div > div > div > ma
 const randomIntFromInterval = (min, max) => Math.floor(Math.random() * (max - min + 1) + min)
 const wait = (timeout = 1000) => new Promise((resolve) => setTimeout(resolve, timeout))
 
+const autoScroll = (page, element, randomScrollHeight = false) => {
+  function fn(el, randomScrollHeight) {
+    const randomIntFromInterval = (min, max) => Math.floor(Math.random() * (max - min + 1) + min)
+    return new Promise((resolve) => {
+      let totalHeight = 0
+      let distance = 100
+      const $el = (el || document.body)
+      let scrollHeight = randomScrollHeight
+        ? randomIntFromInterval(0, $el.scrollHeight)
+        : $el.scrollHeight
+      let timer = setInterval(() => {
+        if (el) {
+          $el.scrollBy(0, distance)
+        } else {
+          window.scrollBy(0, distance)
+        }
+        totalHeight += distance
+        if (totalHeight >= scrollHeight) {
+          clearInterval(timer)
+          resolve()
+        }
+      }, 100)
+    })
+  }
+  if (!element) return page.evaluate(fn, null, randomScrollHeight)
+  return page.evaluate(fn, element, randomScrollHeight)
+}
+
 const restoreSession = async (page) => {
   try {
     const cookies = await cache.get('cookies');
+    if (!cookies) return
     await page.setCookie(...cookies);
   } catch (err) {
     console.error('Error trying to restore session', err)
@@ -54,11 +85,31 @@ const findLikesAttribute = async (postAttributes) => {
 const isLoggedIn = async (page, timeout = 5000) => page
   .waitForSelector(TIMELINE_POSTS_SELECTOR, { timeout })
   .then(() => true)
-  .catch(err => console.error(err) && false)
+  .catch(() => false)
+
+const checkLimitedAccountAccess = async (page) => {
+  const element = await page.$(ACCOUNT_ACCESS_TITLE_SELECTOR)
+  const elementText = await element.evaluate((el) => el.innerText)
+  const isLimited = elementText === 'We\'ve temporarily limited some of your account features.'
+  if (isLimited) {
+    const header = await page.$('.TextGroup-header').then(element => element.evaluate(el => el.innerText))
+    const text = await page.$('.TextGroup-text').then(element => element.evaluate(el => el.innerText))
+    const timeRamaining = await page.$('.TextGroup.TimeRemaining').then(element => element.evaluate(el => el.innerText))
+    throw new Error(`
+** Oops! **
+
+${header}
+${text}
+${timeRamaining}
+`)
+  }
+}
 
 const login = async (page) => {
   await restoreSession(page)
   await page.goto('https://twitter.com', { waitUntil: 'networkidle2' })
+  await page.waitForTimeout(3000)
+  await checkLimitedAccountAccess(page)
   if (await isLoggedIn(page)) return
   await page.goto('https://twitter.com/login', { waitUntil: 'networkidle2' })
   if (!username || !password) {
@@ -68,6 +119,8 @@ const login = async (page) => {
     await page.type('[name="session[password]"]', password)
     await page.keyboard.press('Enter')
   }
+  await page.waitForTimeout(5000)
+  await checkLimitedAccountAccess(page)
   if (await isLoggedIn(page, 600000)) {
     await storeSession(page)
   }
@@ -89,7 +142,6 @@ const getPostWithLikes = async (page, posts = []) => {
 
 const getPostFollowers = async (page) => {
   const followerContainers = await page.$$(POST_LIKERS_SELECTOR)
-  await page.waitForTimeout(2000)
   return Promise.all(followerContainers.map(async (container) => ({
     name: await container.$(POST_LIKER_NAME_SELECTOR).then(element => element && element.evaluate(el => el.innerText)),
     handle: await container.$(POST_LIKER_HANDLE_SELECTOR).then(element => element && element.evaluate(el => el.innerText)),
@@ -108,21 +160,22 @@ const getPostFollowers = async (page) => {
 
 const getLikedPostFollowers = async (page) => {
   await page.waitForSelector(POST_LIKERS_SELECTOR)
+  await page.$(POST_LIKERS_CONTAINER_SELECTOR).then((el) => autoScroll(page, el, true))
   await page.waitForTimeout(5000)
   return getPostFollowers(page)
 }
 
-const pickRandomFollowed = (from, to, followers) => {
-  if (followers.length < from) from = followers.length
-  if (followers.length < to) to = followers.length
+const pickRandomFollowed = (from, to, followed) => {
+  if (followed.length < from) from = followed.length
+  if (followed.length < to) to = followed.length
   const randomHowMany = randomIntFromInterval(from, to)
   const results = []
   for (let i = 0; i < randomHowMany; i++) {
     let randomIndex
     do {
-      randomIndex = randomIntFromInterval(0, followers.length - 1)
-    } while(results.find(follower => follower.handle === followers[randomIndex].handle))
-    results.push(followers[randomIndex])
+      randomIndex = randomIntFromInterval(0, followed.length - 1)
+    } while(results.find(f => f.handle === followed[randomIndex].handle))
+    results.push(followed[randomIndex])
   }
   return results
 }
@@ -158,7 +211,7 @@ const followSome = async (from = 2, to = 5) => {
     const page = await browser.newPage()
     await login(page)
     await wait(3000)
-    await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight))
+    await autoScroll(page, null, true)
     await wait(5000)
     const post = await getPostWithLikes(page)
     if (post) {
@@ -266,9 +319,10 @@ const processor = async (job) => {
 if (unfollowEveryone) {
   (async () => {
     console.log('Unfollowing everyone')
-    do {
+    while ((await cache.getFollowed()).length) {
       await unfollowSome(50, 100, true)
-    } while ((await cache.getFollowed()).length)
+    }
+    console.log('Everyone unfollowed :)')
   })()
 } else {
   promisePool({
