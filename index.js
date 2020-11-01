@@ -1,10 +1,12 @@
 const ispi = require('@rodrigogs/ispi')
+const promisePool = require('@rodrigogs/promise-pool')
 const puppeteer = require('puppeteer')
 const yargs = require('yargs/yargs')
 const cache = require('./cache')
 
-const { username, password } = yargs(process.argv).argv
+const { username, password, unfollowEveryone } = yargs(process.argv).argv
 
+const ONE_DAY_MILLIS = 60 * 1000 * 60 * 24
 const TIMELINE_POSTS_SELECTOR = '#react-root > div > div > div > main > div > div > div > div > div > div > div > div > section > div > div > div > div > div > article > div > div > div'
 const TIMELINE_POST_LINK_SELECTOR = 'a > time'
 const TIMELINE_POST_LIKES_SELECTOR = 'div > div:nth-child(3) > div > div > div > span > span'
@@ -123,16 +125,15 @@ const pickRandomFollowed = (from, to, followers) => {
   return results
 }
 
-const isToday = (someDate) => {
-  const today = new Date()
-  return someDate.getDate() === today.getDate() &&
-    someDate.getMonth() === today.getMonth() &&
-    someDate.getFullYear() === today.getFullYear()
+const wasInTheLast24h = (timestamp) => {
+  const timestamp24hAgo = Date.now() - ONE_DAY_MILLIS
+  return timestamp > timestamp24hAgo
 }
 
 const checkTwitterLimits = async () => {
   const followed = await cache.getFollowed()
-  const followedToday = followed.filter((f) => isToday(new Date(f.followedAt))).length
+  const followedToday = followed.filter((f) => wasInTheLast24h(f.followedAt)).length
+  console.log(`Already followed ${followedToday} accounts in the last 24h`)
   if (followedToday > 390) throw new Error('Stopping auto follower to prevent reaching Twitter limits')
 }
 
@@ -180,14 +181,13 @@ const followSome = async (from = 2, to = 5) => {
   }
 }
 
-const unfollowSome = async (from, to) => {
+const unfollowSome = async (from, to, force = false) => {
   let browser
   try {
     browser = await puppeteer.launch(await getBrowserConfig())
     const page = await browser.newPage()
     await login(page)
     await wait(3000)
-    const ONE_DAY = 60 * 1000 * 60 * 24
     const followed = (await cache.getFollowed()).filter(follower => !follower.unfollowedAt)
     const randomFollowed = pickRandomFollowed(from, to, followed)
     console.log(`Unfollowing ${randomFollowed.length} accounts this time`)
@@ -204,12 +204,14 @@ const unfollowSome = async (from, to) => {
         continue
       }
       const hasFollowingYouBadge = await page.$(ACCOUNT_FOLLOWING_YOU_BADGE_SELECTOR)
-      if (!hasFollowingYouBadge)  {
+      if (!hasFollowingYouBadge) {
         console.log(`${account.handle} is not following you back`)
-        if ((Date.now() - account.followedAt) < ONE_DAY) {
+        if (!force && (Date.now() - account.followedAt) < ONE_DAY_MILLIS) {
           console.log(`${account.handle} was not followed more than one day ago, so lets wait`)
           continue
         }
+      } else {
+        await cache.setFollowedBack(account.handle)
       }
       console.log(`Unfollowing ${account.handle}`)
       await wait(1000)
@@ -228,25 +230,50 @@ const unfollowSome = async (from, to) => {
   }
 }
 
-(async () => {
-  await Promise.all([
-    new Promise(async () => {
-      do {
-        console.log('Starting auto follower')
-        await followSome(2, 10)
-        const randomWaitingTime = randomIntFromInterval(120 * 1000, 1200 * 1000)
-        console.log(`Auto follow sleeping until ${new Date(Date.now() + randomWaitingTime)}`)
-        await wait(randomWaitingTime)
-      } while (true)
-    }),
-    new Promise(async () => {
-      do {
-        console.log('Starting auto unfollower')
-        await unfollowSome(2, 10)
-        const randomWaitingTime = randomIntFromInterval(60 * 1000, 1200 * 1000)
-        console.log(`Auto unfollow sleeping until ${new Date(Date.now() + randomWaitingTime)}`)
-        await wait(randomWaitingTime)
-      } while (true)
-    }),
-  ])
-})()
+const follow = async () => {
+  console.log('Starting auto follower')
+  await followSome(2, 10)
+  const randomWaitingTime = randomIntFromInterval(120 * 1000, 1200 * 1000)
+  console.log(`Auto follow sleeping until ${new Date(Date.now() + randomWaitingTime)}`)
+  await wait(randomWaitingTime)
+}
+
+const unfollow = async () => {
+  console.log('Starting auto unfollower')
+  await unfollowSome(2, 10)
+  const randomWaitingTime = randomIntFromInterval(60 * 1000, 1200 * 1000)
+  console.log(`Auto unfollow sleeping until ${new Date(Date.now() + randomWaitingTime)}`)
+  await wait(randomWaitingTime)
+}
+
+function* generatorFunction() {
+  const jobs = ['follow', 'unfollow']
+  let lastIndex = 0
+  do {
+    if (lastIndex > jobs.length - 1) lastIndex = 0
+    yield jobs[lastIndex++]
+  } while (true)
+}
+
+const processor = async (job) => {
+  if (job === 'follow') return follow()
+  if (job === 'unfollow') return unfollow()
+  throw new Error(`Unknown job ${job}`)
+}
+
+if (unfollowEveryone) {
+  (async () => {
+    console.log('Unfollowing everyone')
+    do {
+      await unfollowSome(50, 100, true)
+    } while ((await cache.getFollowed()).length)
+  })()
+} else {
+  promisePool({
+    generator: generatorFunction(),
+    processor,
+    concurrency: 2,
+  })
+    .then(() => console.log('Finished!'))
+    .catch((err) => console.error(err))
+}

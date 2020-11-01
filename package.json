@@ -10,7 +10,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@rodrigogs/ispi": "^1.1.0",
+    "@rodrigogs/ispi": "^1.1.1",
+    "@rodrigogs/promise-pool": "^1.0.4",
     "lowdb": "^1.0.0",
     "puppeteer": "^5.4.1",
     "yargs": "^16.1.0"
