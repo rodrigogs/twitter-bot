@@ -16,8 +16,10 @@ const POST_LIKER_NAME_SELECTOR = 'a > div > div:nth-child(1) > div > span'
 const POST_LIKER_HANDLE_SELECTOR = 'a > div > div:nth-child(2) > div > span'
 const POST_LIKER_BIO_SELECTOR = 'section > div > div > div > div > div > div > div > div:nth-child(2)'
 const POST_LIKER_FOLLOW_BTN_SELECTOR = 'div > div > div:nth-child(1) > div > div > div > div > div:nth-child(1) > span'
-const ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_1 = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > div > div:nth-child(1) > div > div > div > div:nth-child(4)'
-const ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_2 = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > div > div:nth-child(1) > div > div > div > div:nth-child(3)'
+const ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_1 = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > div > div:nth-child(1) > div > div > div > div:nth-child(1) > div > div > div > span > span'
+const ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_2 = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > div > div:nth-child(1) > div > div > div > div:nth-child(2) > div > div > div > span > span'
+const ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_3 = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > div > div:nth-child(1) > div > div > div > div:nth-child(3) > div > div > div > span > span'
+const ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_4 = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > div > div:nth-child(1) > div > div > div > div:nth-child(4) > div > div > div > span > span'
 const ACCOUNT_UNFOLLOW_BTN_CONFIRM_SELECTOR = '#layers > div:nth-child(2) > div > div > div > div > div > div > div > div > div:nth-child(2) > div > span > span'
 const ACCOUNT_FOLLOWING_YOU_BADGE_SELECTOR = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > div > div:nth-child(1) > div > div > div > div > div > div:nth-child(2) > span'
 
@@ -195,7 +197,7 @@ const unfollowSome = async (from, to, force = false) => {
       console.log(`Verifying ${account.handle}`)
       await page.goto(`https://twitter.com/${account.handle.replace('@', '')}`, { waitUntil: 'networkidle2' })
       await wait(3000)
-      const followUnfollowBtn = await page.$(ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_1) || await page.$(ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_2)
+      const followUnfollowBtn = await page.$(ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_1) || await page.$(ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_2) || await page.$(ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_3) || await page.$(ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_4)
       if (!followUnfollowBtn) continue
       const followUnfollowBtnText = await followUnfollowBtn.evaluate(el => el.innerText)
       if (followUnfollowBtnText === 'Follow') {
