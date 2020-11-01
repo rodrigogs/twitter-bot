@@ -89,6 +89,7 @@ const isLoggedIn = async (page, timeout = 5000) => page
 
 const checkLimitedAccountAccess = async (page) => {
   const element = await page.$(ACCOUNT_ACCESS_TITLE_SELECTOR)
+  if (!element) return
   const elementText = await element.evaluate((el) => el.innerText)
   const isLimited = elementText === 'We\'ve temporarily limited some of your account features.'
   if (isLimited) {
