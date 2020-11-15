@@ -24,20 +24,18 @@ const ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_3 = '#react-root > div > div > div > 
 const ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_4 = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > div > div:nth-child(1) > div > div > div > div:nth-child(4) > div > div > div > span > span'
 const ACCOUNT_UNFOLLOW_BTN_CONFIRM_SELECTOR = '#layers > div:nth-child(2) > div > div > div > div > div > div > div > div > div:nth-child(2) > div > span > span'
 const ACCOUNT_FOLLOWING_YOU_BADGE_SELECTOR = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > div > div:nth-child(1) > div > div > div > div > div > div:nth-child(2) > span'
+const ACCOUNT_MESSAGE_SELECTOR = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > div > div > div > span'
 
 const randomIntFromInterval = (min, max) => Math.floor(Math.random() * (max - min + 1) + min)
 const wait = (timeout = 1000) => new Promise((resolve) => setTimeout(resolve, timeout))
 
-const autoScroll = (page, element, randomScrollHeight = false) => {
-  function fn(el, randomScrollHeight) {
-    const randomIntFromInterval = (min, max) => Math.floor(Math.random() * (max - min + 1) + min)
+const autoScroll = (page, element, scrollHeight) => {
+  function fn(el, scrollHeight) {
     return new Promise((resolve) => {
       let totalHeight = 0
       let distance = 100
       const $el = (el || document.body)
-      let scrollHeight = randomScrollHeight
-        ? randomIntFromInterval(0, $el.scrollHeight)
-        : $el.scrollHeight
+      scrollHeight = scrollHeight || $el.scrollHeight
       let timer = setInterval(() => {
         if (el) {
           $el.scrollBy(0, distance)
@@ -52,8 +50,7 @@ const autoScroll = (page, element, randomScrollHeight = false) => {
       }, 100)
     })
   }
-  if (!element) return page.evaluate(fn, null, randomScrollHeight)
-  return page.evaluate(fn, element, randomScrollHeight)
+  return page.evaluate(fn, element, scrollHeight)
 }
 
 const restoreSession = async (page) => {
@@ -142,8 +139,8 @@ const getPostWithLikes = async (page, posts = []) => {
 }
 
 const getPostFollowers = async (page) => {
-  const followerContainers = await page.$$(POST_LIKERS_SELECTOR)
-  return Promise.all(followerContainers.map(async (container) => ({
+  const postLikers = await page.$$(POST_LIKERS_SELECTOR)
+  return Promise.all(postLikers.map(async (container) => ({
     name: await container.$(POST_LIKER_NAME_SELECTOR).then(element => element && element.evaluate(el => el.innerText)),
     handle: await container.$(POST_LIKER_HANDLE_SELECTOR).then(element => element && element.evaluate(el => el.innerText)),
     bio: await container.$(POST_LIKER_BIO_SELECTOR).then(element => element && element.evaluate(el => el.innerText)),
@@ -153,7 +150,6 @@ const getPostFollowers = async (page) => {
       const followBtnText = await followBtn.evaluate((el) => el.innerText)
       if (followBtnText.search(/following/gi) !== -1) return console.log('Already following')
       await container.$(POST_LIKER_FOLLOW_BTN_SELECTOR).then(el => el.click())
-
       return page.waitForTimeout(3000)
     }
   })))
@@ -161,7 +157,11 @@ const getPostFollowers = async (page) => {
 
 const getLikedPostFollowers = async (page) => {
   await page.waitForSelector(POST_LIKERS_SELECTOR)
-  await page.$(POST_LIKERS_CONTAINER_SELECTOR).then((el) => autoScroll(page, el, true))
+  await page.$(POST_LIKERS_CONTAINER_SELECTOR)
+    .then(async (el) => {
+      const height = await (await el.getProperty('scrollHeight')).jsonValue()
+      return autoScroll(page, el, randomIntFromInterval(0, height))
+    })
   await page.waitForTimeout(5000)
   return getPostFollowers(page)
 }
@@ -212,7 +212,7 @@ const followSome = async (from = 2, to = 5) => {
     const page = await browser.newPage()
     await login(page)
     await wait(3000)
-    await autoScroll(page, null, true)
+    await autoScroll(page, null, randomIntFromInterval(0, await page.evaluate(() => document.body.scrollHeight)))
     await wait(5000)
     const post = await getPostWithLikes(page)
     if (post) {
@@ -223,8 +223,12 @@ const followSome = async (from = 2, to = 5) => {
       for (const follower of randomPickedFollowers) {
         await page.waitForTimeout(randomIntFromInterval(5000, 10000))
         console.log(`Following ${follower.handle}`)
-        await follower.follow()
-        await cache.addFollowed(follower)
+        try {
+          await follower.follow()
+          await cache.addFollowed(follower)
+        } catch (err) {
+          console.error(err)
+        }
       }
     } else {
       await page.evaluate(() => window.alert('!LOL! No posts with likes, get a life!'))
@@ -251,6 +255,13 @@ const unfollowSome = async (from, to, force = false) => {
       console.log(`Verifying ${account.handle}`)
       await page.goto(`https://twitter.com/${account.handle.replace('@', '')}`, { waitUntil: 'networkidle2' })
       await wait(3000)
+      const hasAccountMessage = await page.$(ACCOUNT_MESSAGE_SELECTOR)
+      if (hasAccountMessage) {
+        const message = await hasAccountMessage.evaluate((el) => el.innerText)
+        console.log(`${account.handle} -> ${message}`)
+        await cache.setUnfollowed(account.handle)
+        continue
+      }
       const followUnfollowBtn = await page.$(ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_1) || await page.$(ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_2) || await page.$(ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_3) || await page.$(ACCOUNT_FOLLOW_UNFOLLOW_BTN_SELECTOR_4)
       if (!followUnfollowBtn) continue
       const followUnfollowBtnText = await followUnfollowBtn.evaluate(el => el.innerText)
@@ -288,16 +299,16 @@ const unfollowSome = async (from, to, force = false) => {
 
 const follow = async () => {
   console.log('Starting auto follower')
-  await followSome(2, 10)
-  const randomWaitingTime = randomIntFromInterval(120 * 1000, 1200 * 1000)
+  await followSome(1, 6)
+  const randomWaitingTime = randomIntFromInterval(120 * 1000, 8200 * 1000)
   console.log(`Auto follow sleeping until ${new Date(Date.now() + randomWaitingTime)}`)
   await wait(randomWaitingTime)
 }
 
 const unfollow = async () => {
   console.log('Starting auto unfollower')
-  await unfollowSome(2, 10)
-  const randomWaitingTime = randomIntFromInterval(60 * 1000, 1200 * 1000)
+  await unfollowSome(6, 15)
+  const randomWaitingTime = randomIntFromInterval(60 * 1000, 8200 * 1000)
   console.log(`Auto unfollow sleeping until ${new Date(Date.now() + randomWaitingTime)}`)
   await wait(randomWaitingTime)
 }
