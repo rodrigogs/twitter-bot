@@ -12,7 +12,7 @@ const TIMELINE_POSTS_SELECTOR = '#react-root > div > div > div > main > div > di
 const TIMELINE_POST_LINK_SELECTOR = 'a > time'
 const TIMELINE_POST_LIKES_SELECTOR = 'div > div:nth-child(3) > div > div > div > span > span'
 const POST_ATTRIBUTES_SELECTOR = '#react-root > div > div > div > main > div > div > div > div > div > div:nth-child(2) > div > section > div > div > div:nth-child(1) > div > div > article > div > div > div > div:nth-child(3) > div:nth-child(4) > div > div > div > a';
-const POST_LIKERS_CONTAINER_SELECTOR = '#layers > div:nth-child(2) > div > div > div > div > div > div > div > div > div:nth-child(2) > div'
+const POST_LIKERS_CONTAINER_SELECTOR = '#layers > div:nth-child(2) > div > div > div > div > div > div > div > div > div > div > div > section'
 const POST_LIKERS_SELECTOR = '#layers > div:nth-child(2) > div > div > div > div > div > div > div > div > div > div > div > section > div > div > div > div > div > div'
 const POST_LIKER_NAME_SELECTOR = 'a > div > div:nth-child(1) > div > span'
 const POST_LIKER_HANDLE_SELECTOR = 'a > div > div:nth-child(2) > div > span'
@@ -37,6 +37,7 @@ const autoScroll = (page, element, scrollHeight) => {
       const $el = (el || document.body)
       scrollHeight = scrollHeight || $el.scrollHeight
       let timer = setInterval(() => {
+        console.log({el})
         if (el) {
           $el.scrollBy(0, distance)
         } else {
@@ -144,13 +145,17 @@ const getPostFollowers = async (page) => {
     name: await container.$(POST_LIKER_NAME_SELECTOR).then(element => element && element.evaluate(el => el.innerText)),
     handle: await container.$(POST_LIKER_HANDLE_SELECTOR).then(element => element && element.evaluate(el => el.innerText)),
     bio: await container.$(POST_LIKER_BIO_SELECTOR).then(element => element && element.evaluate(el => el.innerText)),
-    async follow() {
+    async follow(retrying = false) {
       const followBtn = await container.$(POST_LIKER_FOLLOW_BTN_SELECTOR)
       if (!followBtn) return console.log('No follow button')
       const followBtnText = await followBtn.evaluate((el) => el.innerText)
       if (followBtnText.search(/following/gi) !== -1) return console.log('Already following')
       await container.$(POST_LIKER_FOLLOW_BTN_SELECTOR).then(el => el.click())
-      return page.waitForTimeout(3000)
+      await page.waitForTimeout(3000)
+      if (followBtnText.search(/following/gi) !== -1) {
+        if (!retrying) return this.follow(true)
+        throw new Error('Unable to follow for some reason')
+      }
     }
   })))
 }
@@ -159,8 +164,9 @@ const getLikedPostFollowers = async (page) => {
   await page.waitForSelector(POST_LIKERS_SELECTOR)
   await page.$(POST_LIKERS_CONTAINER_SELECTOR)
     .then(async (el) => {
+      const scrollableParent = await page.$('#layers > div:nth-child(2) > div > div > div > div > div > div > div > div > div:nth-child(2) > div')
       const height = await (await el.getProperty('scrollHeight')).jsonValue()
-      return autoScroll(page, el, randomIntFromInterval(0, height))
+      return autoScroll(page, scrollableParent, randomIntFromInterval(0, height))
     })
   await page.waitForTimeout(5000)
   return getPostFollowers(page)
